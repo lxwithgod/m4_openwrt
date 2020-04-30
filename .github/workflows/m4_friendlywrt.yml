@@ -1,0 +1,167 @@
+name: FriendlyWrt for NanoPi-M4
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+    
+    runs-on: ubuntu-18.04
+    if: github.repository == 'vinewx/NanoWrt'
+    
+    steps:
+      
+      - name: Checkout
+        uses: actions/checkout@master
+        with:
+          ref: master
+
+      - name: Initialization Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d
+          sudo apt-get update
+          sudo apt-get -y install subversion bc build-essential asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev patch unzip zlib1g-dev lib32gcc1 libc6-dev-i386 subversion flex uglifyjs git-core gcc-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler
+          wget -O - https://raw.githubusercontent.com/friendlyarm/build-env-on-ubuntu-bionic/master/install.sh | bash
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk
+          
+      - name: Install Repo
+        run: |
+          git clone https://github.com/friendlyarm/repo
+          sudo cp repo/repo /usr/bin/
+          
+      - name: Init Source
+        run: |
+          mkdir friendlywrt-rk3399
+          cd friendlywrt-rk3399
+          repo init -u https://github.com/friendlyarm/friendlywrt_manifests -b master -m rk3399.xml --repo-url=https://github.com/friendlyarm/repo  --no-clone-bundle
+          repo sync -c --no-tags --no-clone-bundle -j8
+
+      - name: Mods
+        run: |
+          chmod +x scripts/*
+          cd friendlywrt-rk3399
+          . ../scripts/pure_config.sh
+          echo CONFIG_PACKAGE_kmod-usb3=y >> configs/config_rk3399
+          cat ../app_config.seed >> configs/config_rk3399
+          sed -i 's/dnsmasq /dnsmasq-full /' friendlywrt/include/target.mk
+          cd friendlywrt
+          cp ../../scripts/settings.sh package/base-files/files/root/
+          chmod +x package/base-files/files/root/settings.sh
+          sed -i '/touch/i\    /root/settings.sh' package/base-files/files/etc/rc.local
+          sed -i '/touch/a\    /etc/init.d/system reload' package/base-files/files/etc/rc.local
+          sed -i '/touch/a\    echo /etc/firstboot_${board} >> /etc/sysupgrade.conf' package/base-files/files/etc/rc.local
+          cd package
+          svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/autocore
+          git clone https://github.com/maxlicheng/luci-app-unblockmusic.git
+          cd luci-app-unblockmusic
+          git checkout bd05512a47dcbf25d62aaaab4d41808792339b16
+          cd ../
+          git clone -b 18.06 https://github.com/jerrykuku/luci-theme-argon.git
+          cd ../
+          mkdir -p package/luci-lib-docker
+          wget https://raw.githubusercontent.com/lisaac/luci-lib-docker/master/Makefile -O package/luci-lib-docker/Makefile
+          mkdir -p package/luci-app-dockerman
+          wget https://raw.githubusercontent.com/lisaac/luci-app-dockerman/master/Makefile -O package/luci-app-dockerman/Makefile
+          mkdir -p package/luci-app-diskman
+          wget https://raw.githubusercontent.com/lisaac/luci-app-diskman/master/Makefile -O package/luci-app-diskman/Makefile
+          mkdir -p package/parted
+          wget https://raw.githubusercontent.com/lisaac/luci-app-diskman/master/Parted.Makefile -O package/parted/Makefile
+          
+      - name: Install OpenClash
+        run: |
+          cd friendlywrt-rk3399/friendlywrt/package
+          svn co https://github.com/vernesong/OpenClash/trunk/luci-app-openclash
+
+      - name: Install Clash Binaries
+        run: |
+          cd friendlywrt-rk3399/friendlywrt/package/base-files/files
+          mkdir -p etc/openclash/core
+          wget -qO- https://github.com/Dreamacro/clash/releases/download/v0.19.0/clash-linux-armv8-v0.19.0.gz | gunzip -c > etc/openclash/core/clash
+          chmod +x etc/openclash/core/clash
+
+      - name: Clean Feeds
+        run: |
+          cd friendlywrt-rk3399/friendlywrt
+          ./scripts/feeds clean -a
+          sed -i '/luci/Id;' feeds.conf.default
+          sed -i '/routing/i\src-git luci https://github.com/coolsnowwolf/luci' feeds.conf.default
+
+      - name: Build FriendlyWrt
+        run: |
+          cd friendlywrt-rk3399
+          sed -i 's/set -eu/set -u/' scripts/mk-friendlywrt.sh
+          sed -i '/install/i\./../../scripts/enable_autocore.sh' scripts/mk-friendlywrt.sh
+          ./build.sh nanopi_m4.mk
+          pushd scripts/sd-fuse
+          wget https://github.com/vinewx/NanoWrt/releases/download/eflasher/emmc-flasher-images.tgz
+          mkdir eflasher
+          tar xzvf emmc-flasher-images.tgz -C eflasher --strip-components=1
+          popd
+          sed -i '/download_img /d' scripts/sd-fuse/mk-emmc-image.sh
+          sudo ./build.sh emmc-img
+      
+      - name: Zip Files
+        run: |
+          gzip friendlywrt-rk3399/out/*.img
+
+      - name: Assemble Artifact
+        id: assemble_artifact
+        run: |
+          rm -rf ./artifact/
+          mkdir -p ./artifact/
+          cp friendlywrt-rk3399/friendlywrt/.config ./artifact/
+          config_name="M4_v$(date +%Y%m%d)_Config"
+          emmc_path="./friendlywrt-rk3399/out/FriendlyWrt_$(date +%Y%m%d)_NanoPi-M4_arm64_eflasher.img.gz"
+          emmc_name="FriendlyWrt_$(date +%Y%m%d)_NanoPi-M4_arm64_eflasher.img.gz"
+          release_tag="v$(date +%Y%m%d)_M4"
+          sd_path="./friendlywrt-rk3399/out/FriendlyWrt_$(date +%Y%m%d)_NanoPi-M4_arm64_sd.img.gz"
+          sd_name="FriendlyWrt_$(date +%Y%m%d)_NanoPi-M4_arm64_sd.img.gz"
+          echo "##[set-output name=emmc_path;]$emmc_path"
+          echo "##[set-output name=emmc_name;]$emmc_name"         
+          echo "##[set-output name=config_name;]$config_name"
+          echo "##[set-output name=release_tag;]$release_tag"
+          echo "##[set-output name=sd_path;]$sd_path"
+          echo "##[set-output name=sd_name;]$sd_name"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@master
+        with:
+          name: ${{ steps.assemble_artifact.outputs.config_name }}
+          path: ./artifact/
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.sec_token }}
+        with:
+          tag_name: ${{ steps.assemble_artifact.outputs.release_tag }}
+          release_name: Automatic Release ${{ steps.assemble_artifact.outputs.release_tag }}
+          draft: false
+          prerelease: false
+
+      - name: Upload SD Asset
+        uses: actions/upload-release-asset@latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.sec_token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+          asset_path: ${{ steps.assemble_artifact.outputs.sd_path }}
+          asset_name: ${{ steps.assemble_artifact.outputs.sd_name }}
+          asset_content_type: application/gz
+
+      - name: Upload EMMC Asset
+        uses: actions/upload-release-asset@latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.sec_token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+          asset_path: ${{ steps.assemble_artifact.outputs.emmc_path }}
+          asset_name: ${{ steps.assemble_artifact.outputs.emmc_name }}
+          asset_content_type: application/gz
