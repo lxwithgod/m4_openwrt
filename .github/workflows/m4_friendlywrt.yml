@@ -1,8 +1,6 @@
 name: FriendlyWrt for NanoPi-M4
 
-on:
-  push:
-    branches: [ master ]
+on:  [push]
   #pull_request:
   #  branches: [ master ]
 
