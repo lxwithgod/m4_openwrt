@@ -1,4 +1,9 @@
 name: FriendlyWrt for NanoPi-M4
+# Copyright (c) 2020 vinewx
+#
+# 警告:
+# 对着屏幕的哥们, 我们允许你使用此脚本, 但不允许你抹去作者的信息, 请保留这段话.
+# 你可以随意使用本脚本的代码, 但请注明出处.
 
 on:  [push]
   #pull_request:
@@ -56,12 +61,16 @@ jobs:
           sed -i '/touch/a\    echo /etc/firstboot_${board} >> /etc/sysupgrade.conf' package/base-files/files/etc/rc.local
           cd package
           svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/autocore
+          svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/luci-app-ramfree
+          svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/luci-app-rclone
+          svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/rclone-webui-react
+          svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/rclone
+          git clone https://github.com/frainzy1477/luci-app-clash.git
           git clone https://github.com/maxlicheng/luci-app-unblockmusic.git
-          cd luci-app-unblockmusic
-          git checkout bd05512a47dcbf25d62aaaab4d41808792339b16
-          cd ../
-          git clone -b 19.07_stable https://github.com/jerrykuku/luci-theme-argon.git
-          cd ../
+          git clone https://github.com/apollo-ng/luci-theme-darkmatter.git
+          cd luci-theme-darkmatter
+          git checkout fd88e48ad0932dd1de47ff1f4274d5202c59f4f0
+          cd ../../
           mkdir -p package/luci-lib-docker
           wget https://raw.githubusercontent.com/lisaac/luci-lib-docker/master/Makefile -O package/luci-lib-docker/Makefile
           mkdir -p package/luci-app-dockerman
@@ -70,18 +79,8 @@ jobs:
           wget https://raw.githubusercontent.com/lisaac/luci-app-diskman/master/Makefile -O package/luci-app-diskman/Makefile
           mkdir -p package/parted
           wget https://raw.githubusercontent.com/lisaac/luci-app-diskman/master/Parted.Makefile -O package/parted/Makefile
-          
-      - name: Install OpenClash
-        run: |
-          cd friendlywrt-rk3399/friendlywrt/package
-          svn co https://github.com/vernesong/OpenClash/trunk/luci-app-openclash
-
-      - name: Install Clash Binaries
-        run: |
-          cd friendlywrt-rk3399/friendlywrt/package/base-files/files
-          mkdir -p etc/openclash/core
-          wget -qO- https://github.com/Dreamacro/clash/releases/download/v0.19.0/clash-linux-armv8-v0.19.0.gz | gunzip -c > etc/openclash/core/clash
-          chmod +x etc/openclash/core/clash
+          mkdir -p staging_dir/host/bin
+          wget -q -O - https://github.com/upx/upx/releases/download/v3.96/upx-3.96-amd64_linux.tar.xz | tar -Jx --strip 1 -f - -C staging_dir/host/bin upx-3.96-amd64_linux/upx
 
       - name: Clean Feeds
         run: |
